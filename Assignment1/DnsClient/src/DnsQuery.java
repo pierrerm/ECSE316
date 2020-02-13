@@ -104,8 +104,10 @@ public class DnsQuery {
 	        
 	        validateResponseId(sendData, receiveData);
 	        
+	        DnsResponse response = new DnsResponse(receiveData, sendData.length, this.queryType);
 	        
-	        
+	        printBytes(receiveData);
+	        printBytes(sendData);
         } catch (SocketTimeoutException e) {
         	int retriesLeft = this.maxRetries - numRetries;
             System.out.println("ERROR\tSocket timed out, retries left: " + retriesLeft);
@@ -209,38 +211,15 @@ public class DnsQuery {
 		}
 	}
 	
-	private static void validateResponse(byte[] request, byte[] response) {
-		if ((int)getBit(response[2],7) > 0) {
-			throw new RuntimeException("ERROR\tReceived response is a query, not a response.");
-		}
-		if ((int)getBit(response[3],7) > 0) {
-			throw new RuntimeException("ERROR\tServer does not support recursive queries.");
-		}
-		switch(getRCode(response[3])){
-		case 1:
-			throw new RuntimeException("ERROR\tInvalid format, the name server was unable to interpret the query.");
-		case 2:
-			throw new RuntimeException("ERROR\tServer failure, the name server was unable to process this query due to a problem with the name server.");
-		case 3:
-			throw new RuntimeException("ERROR\tName error, the domain name referenced in the query does not exist.");
-		case 4:
-			throw new RuntimeException("ERROR\tNot implemented, the name server does not support the requested kind of query.");
-		case 5:
-			throw new RuntimeException("ERROR\tRefused, the name server refuses to perform the requested operation for policy reasons.");
-		default:
-			break;
-		}
+	private static int getWord(byte[] bytes) {
+		return ((bytes[0] & 0xff) << 8) + (bytes[1] & 0xff);
 	}
 	
-	public static int getWord(byte[] bytes) {
-		return ((bytes[2] & 0xff) << 8) | (bytes[3] & 0xff);
-	}
-	
-	public static int getBit(byte b, int p) {
+	private static int getBit(byte b, int p) {
 		return (b >> p) & 1;
 	}
 	
-	public static int getRCode(byte b) {
+	private static int getRCode(byte b) {
 		return ((b >> 0) & 1) + ((b >> 1) & 1) * 2 +((b >> 2) & 1) * 4 + ((b >> 3) & 1) * 8;
 	}
 }
