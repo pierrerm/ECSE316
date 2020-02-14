@@ -106,8 +106,6 @@ public class DnsQuery {
 	        
 	        DnsResponse response = new DnsResponse(receiveData, sendData.length, this.queryType);
 	        
-	        printBytes(receiveData);
-	        printBytes(sendData);
         } catch (SocketTimeoutException e) {
         	int retriesLeft = this.maxRetries - numRetries;
             System.out.println("ERROR\tSocket timed out, retries left: " + retriesLeft);

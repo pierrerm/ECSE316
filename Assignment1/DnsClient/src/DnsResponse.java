@@ -8,10 +8,12 @@ public class DnsResponse {
 	private int querySize;
 	private int ANCount, NSCount, ARCount;
 	private boolean AA;
+	private int index;
 	
 	public DnsResponse(byte[] responseData, int querySize, String queryType) {
 		this.responseData = responseData;
 		this.querySize = querySize;
+		this.index = querySize;
 		this.queryType = queryType;
 		this.AA = getBit(responseData[2], 2) == 1;
         
@@ -53,26 +55,144 @@ public class DnsResponse {
 	}
 	
 	private void printRecords() {
-		int index = this.querySize;
 		if (this.ANCount > 0) {
 			System.out.println("***Answer Section (" + this.ANCount + " records)***");
 			for(int i = 0; i < this.ANCount; i ++){
-				index += this.printRecord();
+				this.printRecord(this.index, true);
 	        }
 		}
 		if (this.NSCount > 0) {
-			for(int i = 0; i < this.NSCount; i ++){				
+			for(int i = 0; i < this.NSCount; i ++){	
+				this.printRecord(this.index, false);			
 	        }
 		}
 		if (this.ARCount > 0) {
 			System.out.println("***Additional Section (" + this.ARCount + " records)***");
-			for(int i = 0; i < this.ARCount; i ++){				
+			for(int i = 0; i < this.ARCount; i ++){	
+				this.printRecord(this.index, true);			
 	        }
 		}
 	}
 	
-	private int printRecord() {
-		return 0;
+	private void printRecord(int index, boolean print) {
+		DnsDataEntry entry = this.parseDomain(this.index);
+		this.index = entry.getBytes();
+		long cacheSeconds = 0;
+		int rdLength = 0;
+		switch(this.parseType()){
+		case 1:
+			this.validateClassCode();
+			cacheSeconds = this.getCacheSeconds();
+			rdLength = this.getRdLength();
+			DnsDataEntry ipEntry = this.parseIp(this.index, rdLength);
+			if (print) System.out.print("IP\t" + ipEntry.getDomain() + "\t" + cacheSeconds + "\t" + (this.AA ? "auth" : "nonauth") + "\n");
+			this.index = ipEntry.getBytes();
+			break;
+		case 2:
+			this.validateClassCode();
+			cacheSeconds = this.getCacheSeconds();
+			rdLength = this.getRdLength();
+			DnsDataEntry nsEntry = parseDomain(this.index);
+			if (print) System.out.print("NS\t" + entry.getDomain() + "\t" + cacheSeconds + "\t" + (this.AA ? "auth" : "nonauth") + "\n");
+			this.index = nsEntry.getBytes();
+			break;
+		case 5:
+			this.validateClassCode();
+			cacheSeconds = this.getCacheSeconds();
+			rdLength = this.getRdLength();
+			DnsDataEntry cNameEntry = parseDomain(this.index);
+			if (print) System.out.print("CNAME\t" + entry.getDomain() + "\t" + cacheSeconds + "\t" + (this.AA ? "auth" : "nonauth") + "\n");
+			this.index = cNameEntry.getBytes();
+			break;
+		case 15:
+			this.validateClassCode();
+			cacheSeconds = this.getCacheSeconds();
+			rdLength = this.getRdLength();
+			int pref = this.getPref();
+			DnsDataEntry mxEntry = parseDomain(this.index);
+			if (print) System.out.print("CNAME\t" + entry.getDomain() +  "\t" + pref + "\t" + cacheSeconds + "\t" + (this.AA ? "auth" : "nonauth") + "\n");
+			this.index = mxEntry.getBytes();
+			break;
+		default:
+			throw new RuntimeException("ERROR\tUnexpected record type, could not process the server response.");
+		}
+	}
+	
+	private DnsDataEntry parseDomain(int index) {
+		DnsDataEntry entry = new DnsDataEntry();
+		String domain = "";
+		int storedIndex = index;
+		int length = -1;
+		boolean compressed = false;
+		
+		while(this.responseData[index] != 0x00) {
+			if((this.responseData[index] & 0xC0) == 0xC0 && length <= 0) {
+				byte[] domainIndex = {(byte) (this.responseData[index++] & 0x3f), this.responseData[index]};
+				storedIndex = index;
+				compressed = true;
+				index = getWord(domainIndex);
+			} else {
+				if (length == 0) {
+					domain += ".";
+					length = this.responseData[index];
+				} else if (length < 0) {
+					length = this.responseData[index];
+				} else {
+					domain += ((char) (this.responseData[index] & 0xFF));
+					length--;
+				}
+				index++;
+			} 
+		}
+		if (compressed) entry.setBytes(++storedIndex);
+		else entry.setBytes(index);
+		entry.setDomain(domain);
+		return entry;
+	}
+	
+	private DnsDataEntry parseIp(int index, int length) {
+		DnsDataEntry entry = new DnsDataEntry();
+		String ip = "";
+		int storedIndex = index;
+		while(length > 0) {
+			ip += String.valueOf(this.responseData[index] & 0xff);
+			length--;
+			if (length != 0) {
+				ip += ".";
+			}
+			index++; 
+		}
+		entry.setBytes(++storedIndex);
+		entry.setDomain(ip);
+		return entry;
+	}
+	
+	private int parseType() {
+		byte[] type = {this.responseData[this.index++], this.responseData[this.index++]};
+		return getWord(type);
+	}
+	
+	private void validateClassCode() {
+		byte[] classCode = {this.responseData[this.index++], this.responseData[this.index++]};
+		if (getWord(classCode) != 1) {
+			throw new RuntimeException("ERROR\tUnexpected class code, could not process the server response.");
+		}
+	}
+	
+	private long getCacheSeconds() {
+		byte[] LMB = {this.responseData[this.index++], this.responseData[this.index++]};
+		byte[] RMB = {this.responseData[this.index++], this.responseData[this.index++]};
+		return getWord(LMB) * 65536 + getWord(RMB);
+	}
+	
+	private int getRdLength() {
+		byte[] rdLength = {this.responseData[this.index++], this.responseData[this.index++]};
+		return getWord(rdLength);
+	}
+	
+	private int getPref() {
+		byte[] pref = {this.responseData[this.index++], this.responseData[this.index++]};
+		return getWord(pref);
 	}
 	
 	private static int getWord(byte[] bytes) {
